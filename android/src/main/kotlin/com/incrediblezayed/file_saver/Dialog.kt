@@ -5,6 +5,7 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Environment
 import android.provider.DocumentsContract
+import android.provider.OpenableColumns
 import android.util.Log
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.plugin.common.PluginRegistry
@@ -19,6 +20,7 @@ class Dialog(private val activity: Activity) : PluginRegistry.ActivityResultList
     private var result: MethodChannel.Result? = null
     private var bytes: ByteArray? = null
     private var fileName: String? = null
+    private var expectedFileName: String? = null
     private val TAG = "Dialog Activity"
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
@@ -59,6 +61,7 @@ class Dialog(private val activity: Activity) : PluginRegistry.ActivityResultList
         this.result = result
         this.bytes = bytes
         this.fileName = fileName
+        this.expectedFileName = fileNameWithExtension
         val intent =
             Intent(Intent.ACTION_CREATE_DOCUMENT)
         intent.addCategory(Intent.CATEGORY_OPENABLE)
@@ -74,9 +77,10 @@ class Dialog(private val activity: Activity) : PluginRegistry.ActivityResultList
     private fun completeFileOperation(uri: Uri) {
         CoroutineScope(Dispatchers.Main).launch {
             try {
-                saveFile(uri)
+                val finalUri = resolveNameConflict(uri)
+                saveFile(finalUri)
                 val fileUtils = FileUtils(activity)
-                result?.success(fileUtils.getPath(uri));
+                result?.success(fileUtils.getPath(finalUri));
                 result = null
                 //result?.success(getRealPathFromUri(activity, uri))
             } catch (e: SecurityException) {
@@ -101,6 +105,51 @@ class Dialog(private val activity: Activity) : PluginRegistry.ActivityResultList
 
         } catch (e: Exception) {
             Log.d(TAG, "Error while writing file" + e.message)
+        }
+    }
+
+    // ACTION_CREATE_DOCUMENT auto-resolves conflicts by appending " (N)" AFTER
+    // the extension (e.g. "report.xls (1)"), which breaks the file's type.
+    // When we detect that pattern, rename the document so the suffix sits
+    // BEFORE the extension instead ("report (1).xls"), trying increasing N
+    // until the rename succeeds (i.e. the target name is free).
+    private fun resolveNameConflict(uri: Uri): Uri {
+        val expected = expectedFileName ?: return uri
+        val actual = queryDisplayName(uri) ?: return uri
+        val suffixMatch = Regex("^${Regex.escape(expected)} \\((\\d+)\\)$")
+            .matchEntire(actual) ?: return uri
+
+        val dotIdx = expected.lastIndexOf('.')
+        val base = if (dotIdx > 0) expected.substring(0, dotIdx) else expected
+        val ext = if (dotIdx > 0) expected.substring(dotIdx) else ""
+
+        var counter = suffixMatch.groupValues[1].toIntOrNull() ?: 1
+        var attempts = 0
+        while (attempts < 10000) {
+            val candidate = "$base ($counter)$ext"
+            try {
+                val newUri = DocumentsContract.renameDocument(
+                    activity.contentResolver, uri, candidate
+                )
+                if (newUri != null) return newUri
+            } catch (e: Exception) {
+                Log.d(TAG, "Rename to '$candidate' failed: ${e.message}")
+            }
+            counter++
+            attempts++
+        }
+        return uri
+    }
+
+    private fun queryDisplayName(uri: Uri): String? {
+        return try {
+            activity.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (idx >= 0 && cursor.moveToFirst()) cursor.getString(idx) else null
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "Failed to query display name: ${e.message}")
+            null
         }
     }
 }

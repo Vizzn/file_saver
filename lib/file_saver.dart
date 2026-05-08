@@ -4,7 +4,6 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:file_saver/src/models/file.model.dart';
 import 'package:file_saver/src/models/link_details.dart';
-import 'package:file_saver/src/platform_handler/platform_handler.dart';
 import 'package:file_saver/src/saver.dart';
 import 'package:file_saver/src/utils/helpers.dart';
 import 'package:file_saver/src/utils/mime_types.dart';
@@ -12,21 +11,6 @@ import 'package:flutter/foundation.dart';
 
 export 'package:file_saver/src/models/link_details.dart';
 export 'package:file_saver/src/utils/mime_types.dart';
-
-/// Callback invoked when a file with the same name already exists in the
-/// destination directory.
-///
-/// [currentName] is the conflicting candidate name (without extension).
-/// [existingNames] is the list of every file name currently in the destination
-/// directory (basename with extension), letting the callback pick a name that
-/// doesn't collide with any of them in a single call.
-///
-/// Return a new name (without extension). Returning [currentName] unchanged
-/// accepts overwriting the existing file. Throw to abort the save.
-typedef OnNameConflict = Future<String> Function(
-  String currentName,
-  List<String> existingNames,
-);
 
 class FileSaver {
   final String _somethingWentWrong =
@@ -66,11 +50,6 @@ class FileSaver {
   ///
   /// mimeType (Mainly required for web): MimeType from enum MimeType..
   ///
-  /// [onNameConflict]: Optional callback invoked when a file with the same
-  /// name already exists at the save destination. Return a new name to retry,
-  /// or return the same name to accept overwriting. Not invoked on web (the
-  /// browser handles conflicts itself) or in [saveAs] (the OS dialog does).
-  ///
   /// More Mimetypes will be added in future
   Future<String> saveFile({
     required String name,
@@ -84,7 +63,6 @@ class FileSaver {
     String? customMimeType,
     Dio? dioClient,
     Uint8List Function(dynamic data)? transformDioResponse,
-    OnNameConflict? onNameConflict,
   }) async {
     if (mimeType == MimeType.custom && customMimeType == null) {
       throw Exception(
@@ -103,17 +81,6 @@ class FileSaver {
             dioClient: dioClient,
             transformDioResponse: transformDioResponse,
           );
-    }
-    if (onNameConflict != null) {
-      final saveDir = isFile
-          ? await Helpers.getDirectory()
-          : await PlatformHandler.instance.getSaveDirectory();
-      name = await _resolveNameConflict(
-        directory: saveDir,
-        name: name,
-        extension: extension,
-        onNameConflict: onNameConflict,
-      );
     }
     try {
       if (isFile) {
@@ -139,30 +106,6 @@ class FileSaver {
     } catch (e) {
       rethrow;
     }
-  }
-
-  Future<String> _resolveNameConflict({
-    required String? directory,
-    required String name,
-    required String extension,
-    required OnNameConflict onNameConflict,
-  }) async {
-    if (directory == null) return name;
-    final dir = Directory(directory);
-    if (!await dir.exists()) return name;
-    final slash = Helpers.getFilePathSlash();
-    final existingNames = await dir
-        .list(followLinks: false)
-        .where((e) => e is File)
-        .map((e) => e.path.split(slash).last)
-        .toList();
-    String currentName = name;
-    while (existingNames.contains('$currentName$extension')) {
-      final newName = await onNameConflict(currentName, existingNames);
-      if (newName == currentName) return currentName;
-      currentName = newName;
-    }
-    return currentName;
   }
 
   Future<String?> saveFileOnly(
@@ -209,12 +152,6 @@ class FileSaver {
   ///
   /// mimeType (Mainly required for web): MimeType from enum MimeType..
   ///
-  /// [onNameConflict]: Optional callback used to pre-resolve the suggested
-  /// file name against the platform's default save directory before opening
-  /// the system Save As dialog. This only adjusts the initial name shown in
-  /// the dialog — the user can still rename and pick any location, and the OS
-  /// handles any final conflict at the chosen destination.
-  ///
   Future<String?> saveAs({
     required String name,
     Uint8List? bytes,
@@ -227,7 +164,6 @@ class FileSaver {
     String? customMimeType,
     Dio? dioClient,
     Uint8List Function(dynamic data)? transformDioResponse,
-    OnNameConflict? onNameConflict,
   }) async {
     if (mimeType == MimeType.custom && customMimeType == null) {
       throw Exception(
@@ -244,15 +180,6 @@ class FileSaver {
           dioClient: dioClient,
           transformDioResponse: transformDioResponse,
         );
-
-    if (onNameConflict != null) {
-      name = await _resolveNameConflict(
-        directory: await PlatformHandler.instance.getSaveDirectory(),
-        name: name,
-        extension: extension,
-        onNameConflict: onNameConflict,
-      );
-    }
 
     _saver = Saver(
         fileModel: FileModel(

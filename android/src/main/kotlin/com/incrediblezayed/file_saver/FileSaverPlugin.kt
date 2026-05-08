@@ -74,11 +74,6 @@ class FileSaverPlugin : FlutterPlugin, ActivityAware, MethodCallHandler {
                         result = result
                     )
                 }
-                "getSaveDirectory" -> {
-                    Log.d(tag, "Get Save Directory Method Called")
-                    val dir = activity?.activity?.baseContext?.getExternalFilesDir(null)?.absolutePath
-                    result.success(dir)
-                }
                 else -> {
                     Log.d(tag, "Unknown Method called " + call.method!!)
                     result.notImplemented()

@@ -20,7 +20,4 @@ class PlatformHandlerWeb extends PlatformHandler {
   Future<String?> saveAs(FileModel fileModel) async {
     throw UnimplementedError('saveAs is not implemented on web yet');
   }
-
-  @override
-  Future<String?> getSaveDirectory() async => null;
 }
