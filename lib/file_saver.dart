@@ -195,6 +195,12 @@ class FileSaver {
   ///
   /// mimeType (Mainly required for web): MimeType from enum MimeType..
   ///
+  /// [onNameConflict]: Optional callback used to pre-resolve the suggested
+  /// file name against the platform's default save directory before opening
+  /// the system Save As dialog. This only adjusts the initial name shown in
+  /// the dialog — the user can still rename and pick any location, and the OS
+  /// handles any final conflict at the chosen destination.
+  ///
   Future<String?> saveAs({
     required String name,
     Uint8List? bytes,
@@ -207,6 +213,7 @@ class FileSaver {
     String? customMimeType,
     Dio? dioClient,
     Uint8List Function(dynamic data)? transformDioResponse,
+    OnNameConflict? onNameConflict,
   }) async {
     if (mimeType == MimeType.custom && customMimeType == null) {
       throw Exception(
@@ -223,6 +230,15 @@ class FileSaver {
           dioClient: dioClient,
           transformDioResponse: transformDioResponse,
         );
+
+    if (onNameConflict != null) {
+      name = await _resolveNameConflict(
+        directory: await PlatformHandler.instance.getSaveDirectory(),
+        name: name,
+        extension: extension,
+        onNameConflict: onNameConflict,
+      );
+    }
 
     _saver = Saver(
         fileModel: FileModel(
