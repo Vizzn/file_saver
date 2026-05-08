@@ -15,6 +15,7 @@ class PlatformHandlerAll extends PlatformHandler {
   final MethodChannel _channel = const MethodChannel('file_saver');
   final String _saveAs = 'saveAs';
   final String _saveFile = 'saveFile';
+  final String _getSaveDirectory = 'getSaveDirectory';
 
   final String _somethingWentWrong =
       'Something went wrong, please report the issue https://www.github.com/incrediblezayed/file_saver/issues';
@@ -63,6 +64,14 @@ class PlatformHandlerAll extends PlatformHandler {
     } else {
       return await saveFileForOtherPlatforms(fileModel);
     }
+  }
+
+  @override
+  Future<String?> getSaveDirectory() async {
+    if (Platform.isAndroid) {
+      return await _channel.invokeMethod<String>(_getSaveDirectory);
+    }
+    return await Helpers.getDirectory();
   }
 
   ///Open File Manager

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:file_saver/src/models/file.model.dart';
 import 'package:file_saver/src/models/link_details.dart';
+import 'package:file_saver/src/platform_handler/platform_handler.dart';
 import 'package:file_saver/src/saver.dart';
 import 'package:file_saver/src/utils/helpers.dart';
 import 'package:file_saver/src/utils/mime_types.dart';
@@ -11,6 +12,14 @@ import 'package:flutter/foundation.dart';
 
 export 'package:file_saver/src/models/link_details.dart';
 export 'package:file_saver/src/utils/mime_types.dart';
+
+/// Callback invoked when a file with the same name already exists in the
+/// destination directory. The returned name (without extension) is used as the
+/// new candidate; if it still conflicts the callback is invoked again.
+///
+/// Return the same [currentName] to accept overwriting the existing file, or
+/// throw to abort the save.
+typedef OnNameConflict = Future<String> Function(String currentName);
 
 class FileSaver {
   final String _somethingWentWrong =
@@ -50,6 +59,11 @@ class FileSaver {
   ///
   /// mimeType (Mainly required for web): MimeType from enum MimeType..
   ///
+  /// [onNameConflict]: Optional callback invoked when a file with the same
+  /// name already exists at the save destination. Return a new name to retry,
+  /// or return the same name to accept overwriting. Not invoked on web (the
+  /// browser handles conflicts itself) or in [saveAs] (the OS dialog does).
+  ///
   /// More Mimetypes will be added in future
   Future<String> saveFile({
     required String name,
@@ -63,6 +77,7 @@ class FileSaver {
     String? customMimeType,
     Dio? dioClient,
     Uint8List Function(dynamic data)? transformDioResponse,
+    OnNameConflict? onNameConflict,
   }) async {
     if (mimeType == MimeType.custom && customMimeType == null) {
       throw Exception(
@@ -81,6 +96,17 @@ class FileSaver {
             dioClient: dioClient,
             transformDioResponse: transformDioResponse,
           );
+    }
+    if (onNameConflict != null) {
+      final saveDir = isFile
+          ? await Helpers.getDirectory()
+          : await PlatformHandler.instance.getSaveDirectory();
+      name = await _resolveNameConflict(
+        directory: saveDir,
+        name: name,
+        extension: extension,
+        onNameConflict: onNameConflict,
+      );
     }
     try {
       if (isFile) {
@@ -106,6 +132,23 @@ class FileSaver {
     } catch (e) {
       rethrow;
     }
+  }
+
+  Future<String> _resolveNameConflict({
+    required String? directory,
+    required String name,
+    required String extension,
+    required OnNameConflict onNameConflict,
+  }) async {
+    if (directory == null) return name;
+    final slash = Helpers.getFilePathSlash();
+    String currentName = name;
+    while (await File('$directory$slash$currentName$extension').exists()) {
+      final newName = await onNameConflict(currentName);
+      if (newName == currentName) return currentName;
+      currentName = newName;
+    }
+    return currentName;
   }
 
   Future<String?> saveFileOnly(

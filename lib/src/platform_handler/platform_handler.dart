@@ -13,4 +13,8 @@ abstract class PlatformHandler {
   Future<String?> saveFile(FileModel fileModel);
 
   Future<String?> saveAs(FileModel fileModel);
+
+  /// Returns the directory that [saveFile] writes to on this platform, or
+  /// `null` when the platform does not expose a path (e.g. web).
+  Future<String?> getSaveDirectory();
 }
