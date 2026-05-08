@@ -14,12 +14,19 @@ export 'package:file_saver/src/models/link_details.dart';
 export 'package:file_saver/src/utils/mime_types.dart';
 
 /// Callback invoked when a file with the same name already exists in the
-/// destination directory. The returned name (without extension) is used as the
-/// new candidate; if it still conflicts the callback is invoked again.
+/// destination directory.
 ///
-/// Return the same [currentName] to accept overwriting the existing file, or
-/// throw to abort the save.
-typedef OnNameConflict = Future<String> Function(String currentName);
+/// [currentName] is the conflicting candidate name (without extension).
+/// [existingNames] is the list of every file name currently in the destination
+/// directory (basename with extension), letting the callback pick a name that
+/// doesn't collide with any of them in a single call.
+///
+/// Return a new name (without extension). Returning [currentName] unchanged
+/// accepts overwriting the existing file. Throw to abort the save.
+typedef OnNameConflict = Future<String> Function(
+  String currentName,
+  List<String> existingNames,
+);
 
 class FileSaver {
   final String _somethingWentWrong =
@@ -141,10 +148,17 @@ class FileSaver {
     required OnNameConflict onNameConflict,
   }) async {
     if (directory == null) return name;
+    final dir = Directory(directory);
+    if (!await dir.exists()) return name;
     final slash = Helpers.getFilePathSlash();
+    final existingNames = await dir
+        .list(followLinks: false)
+        .where((e) => e is File)
+        .map((e) => e.path.split(slash).last)
+        .toList();
     String currentName = name;
-    while (await File('$directory$slash$currentName$extension').exists()) {
-      final newName = await onNameConflict(currentName);
+    while (existingNames.contains('$currentName$extension')) {
+      final newName = await onNameConflict(currentName, existingNames);
       if (newName == currentName) return currentName;
       currentName = newName;
     }
