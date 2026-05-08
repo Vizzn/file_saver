@@ -1,10 +1,12 @@
 package com.incrediblezayed.file_saver
 
 import android.app.Activity
+import android.content.ContentValues
 import android.content.Intent
 import android.net.Uri
 import android.os.Environment
 import android.provider.DocumentsContract
+import android.provider.MediaStore
 import android.provider.OpenableColumns
 import android.util.Log
 import io.flutter.plugin.common.MethodChannel
@@ -21,6 +23,7 @@ class Dialog(private val activity: Activity) : PluginRegistry.ActivityResultList
     private var bytes: ByteArray? = null
     private var fileName: String? = null
     private var expectedFileName: String? = null
+    private var expectedMimeType: String? = null
     private val TAG = "Dialog Activity"
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?): Boolean {
@@ -62,6 +65,7 @@ class Dialog(private val activity: Activity) : PluginRegistry.ActivityResultList
         this.bytes = bytes
         this.fileName = fileName
         this.expectedFileName = fileNameWithExtension
+        this.expectedMimeType = type
         val intent =
             Intent(Intent.ACTION_CREATE_DOCUMENT)
         intent.addCategory(Intent.CATEGORY_OPENABLE)
@@ -111,8 +115,9 @@ class Dialog(private val activity: Activity) : PluginRegistry.ActivityResultList
     // ACTION_CREATE_DOCUMENT auto-resolves conflicts by appending " (N)" AFTER
     // the extension (e.g. "report.xls (1)"), which breaks the file's type.
     // When we detect that pattern, rename the document so the suffix sits
-    // BEFORE the extension instead ("report (1).xls"), trying increasing N
-    // until the rename succeeds (i.e. the target name is free).
+    // BEFORE the extension instead ("report (1).xls") and refresh the stored
+    // MIME type — Downloads provider keeps the original octet-stream after
+    // rename, so file managers would otherwise still show the file as binary.
     private fun resolveNameConflict(uri: Uri): Uri {
         val expected = expectedFileName ?: return uri
         val actual = queryDisplayName(uri) ?: return uri
@@ -128,10 +133,15 @@ class Dialog(private val activity: Activity) : PluginRegistry.ActivityResultList
         while (attempts < 10000) {
             val candidate = "$base ($counter)$ext"
             try {
+                // renameDocument throws on name conflict; returns null when the
+                // rename succeeded in place (URI unchanged), or a new URI when
+                // the provider re-issues an identifier.
                 val newUri = DocumentsContract.renameDocument(
                     activity.contentResolver, uri, candidate
                 )
-                if (newUri != null) return newUri
+                val finalUri = newUri ?: uri
+                refreshMimeType(finalUri)
+                return finalUri
             } catch (e: Exception) {
                 Log.d(TAG, "Rename to '$candidate' failed: ${e.message}")
             }
@@ -139,6 +149,18 @@ class Dialog(private val activity: Activity) : PluginRegistry.ActivityResultList
             attempts++
         }
         return uri
+    }
+
+    private fun refreshMimeType(uri: Uri) {
+        val mime = expectedMimeType ?: return
+        try {
+            val values = ContentValues().apply {
+                put(MediaStore.MediaColumns.MIME_TYPE, mime)
+            }
+            activity.contentResolver.update(uri, values, null, null)
+        } catch (e: Exception) {
+            Log.d(TAG, "Failed to update MIME type to '$mime': ${e.message}")
+        }
     }
 
     private fun queryDisplayName(uri: Uri): String? {
